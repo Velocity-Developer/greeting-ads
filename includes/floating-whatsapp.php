@@ -259,11 +259,11 @@ function tampilan_baru()
             waFloat.dataset.trafficType = waTarget.isAds ? 'ads' : 'organic';
             waFloat.dataset.greeting = waTarget.greeting;
 
-            if (typeof dataLayer !== 'undefined' && Array.isArray(dataLayer)) {
-              dataLayer.push({
-                event: 'klik_wa_ads'
-              });
-            }
+            // if (typeof dataLayer !== 'undefined' && Array.isArray(dataLayer)) {
+            //   dataLayer.push({
+            //     event: 'klik_wa_ads'
+            //   });
+            // }
 
             const ajaxUrl = waFloat.dataset.asyncTrackUrl || '';
             const nonce = waFloat.dataset.asyncTrackNonce || '';
