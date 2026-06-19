@@ -21,6 +21,89 @@ function velocity_add_admin_page()
     'rekap-whatsapp-clicks',
     'velocity_render_whatsapp_clicks_page'
   );
+
+  add_submenu_page(
+    'rekap-chat-form',
+    'Settings WhatsApp',
+    'Settings',
+    'manage_options',
+    'rekap-chat-settings',
+    'velocity_render_whatsapp_settings_page'
+  );
+}
+
+add_action('admin_init', 'velocity_register_whatsapp_settings');
+
+function velocity_register_whatsapp_settings()
+{
+  register_setting(
+    'velocity_whatsapp_settings_group',
+    'vd_whatsapp_url_template',
+    [
+      'sanitize_callback' => 'velocity_sanitize_whatsapp_url_template',
+      'default' => vd_get_default_whatsapp_url_template(),
+    ]
+  );
+}
+
+function velocity_sanitize_whatsapp_url_template($template)
+{
+  $default_template = vd_get_default_whatsapp_url_template();
+
+  if (!is_string($template)) {
+    return $default_template;
+  }
+
+  $template = trim(wp_unslash($template));
+  if ($template === '') {
+    return $default_template;
+  }
+
+  return $template;
+}
+
+function velocity_render_whatsapp_settings_page()
+{
+  if (!current_user_can('manage_options')) {
+    return;
+  }
+
+  $current_template = vd_get_whatsapp_url_template();
+?>
+  <div class="wrap">
+    <h1>Settings WhatsApp</h1>
+    <?php settings_errors('vd_whatsapp_url_template'); ?>
+    <form method="post" action="options.php">
+      <?php settings_fields('velocity_whatsapp_settings_group'); ?>
+      <table class="form-table" role="presentation">
+        <tr>
+          <th scope="row">
+            <label for="vd_whatsapp_url_template">Template URL WhatsApp</label>
+          </th>
+          <td>
+            <input
+              type="text"
+              id="vd_whatsapp_url_template"
+              name="vd_whatsapp_url_template"
+              class="regular-text"
+              style="width: 100%; max-width: 720px;"
+              value="<?php echo esc_attr($current_template); ?>">
+            <p class="description">
+              Bisa isi URL bebas seperti WhatsApp, Google Form, atau halaman lain.
+            </p>
+            <p class="description">
+              Jika ingin dinamis, Anda bisa tetap pakai placeholder <code>{number}</code> dan <code>{message}</code>.
+            </p>
+            <p class="description">
+              Contoh: <code><?php echo esc_html(vd_get_default_whatsapp_url_template()); ?></code> atau <code>https://docs.google.com/forms/d/e/xxxxx/viewform</code>
+            </p>
+          </td>
+        </tr>
+      </table>
+      <?php submit_button('Simpan Settings'); ?>
+    </form>
+  </div>
+<?php
 }
 
 // READ + FORM + CREATE + UPDATE + DELETE HANDLING

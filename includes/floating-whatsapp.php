@@ -1,4 +1,39 @@
 <?php
+function vd_get_default_whatsapp_url_template()
+{
+  return 'https://wa.me/{number}?text={message}';
+}
+
+function vd_get_whatsapp_url_template()
+{
+  $template = get_option('vd_whatsapp_url_template', vd_get_default_whatsapp_url_template());
+
+  if (!is_string($template)) {
+    return vd_get_default_whatsapp_url_template();
+  }
+
+  $template = trim($template);
+  if ($template === '') {
+    return vd_get_default_whatsapp_url_template();
+  }
+
+  return $template;
+}
+
+function vd_build_whatsapp_url($number, $message)
+{
+  $template = vd_get_whatsapp_url_template();
+
+  if (strpos($template, '{number}') !== false || strpos($template, '{message}') !== false) {
+    return strtr($template, [
+      '{number}' => rawurlencode((string) $number),
+      '{message}' => rawurlencode((string) $message),
+    ]);
+  }
+
+  return $template;
+}
+
 function tampilan_baru()
 {
   ob_start();
@@ -118,14 +153,15 @@ function tampilan_baru()
   $wa_message = $is_ads
     ? sprintf('Hallo, Saya tertarik buat website di Velocity Developer [%s]. Mohon infonya.', $ads_greeting)
     : 'Hallo, Saya tertarik buat website di Velocity Developer [v0]. Mohon infonya.';
-  $wa_url = 'https://wa.me/' . $wa_number . '?text=' . rawurlencode($wa_message);
+  $wa_url = vd_build_whatsapp_url($wa_number, $wa_message);
+  $wa_url_template = vd_get_whatsapp_url_template();
 
   $tracking_greeting = $is_ads ? $ads_greeting : 'v0';
   $tracking_type = $is_ads ? 'ads' : 'organic';
   $async_track_nonce = wp_create_nonce('vd_async_wa_click');
   $async_track_url = admin_url('admin-ajax.php');
   ?>
-  <a href="<?php echo esc_url($wa_url); ?>" class="wa-float" target="_blank" rel="noopener" data-traffic-type="<?php echo esc_attr($tracking_type); ?>" data-greeting="<?php echo esc_attr($tracking_greeting); ?>" data-async-track-url="<?php echo esc_url($async_track_url); ?>" data-async-track-nonce="<?php echo esc_attr($async_track_nonce); ?>">
+  <a href="<?php echo esc_url($wa_url); ?>" class="wa-float" target="_blank" rel="noopener" data-traffic-type="<?php echo esc_attr($tracking_type); ?>" data-greeting="<?php echo esc_attr($tracking_greeting); ?>" data-url-template="<?php echo esc_attr($wa_url_template); ?>" data-async-track-url="<?php echo esc_url($async_track_url); ?>" data-async-track-nonce="<?php echo esc_attr($async_track_nonce); ?>">
     <span class="ripple"></span>
     <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
       <path
@@ -154,6 +190,13 @@ function tampilan_baru()
           } catch (e) {
             return '';
           }
+        };
+
+        const buildWhatsAppUrl = function(number, message) {
+          const template = (waFloat.dataset.urlTemplate || '').trim() || 'https://wa.me/{number}?text={message}';
+          return template
+            .replace('{number}', encodeURIComponent(number || ''))
+            .replace('{message}', encodeURIComponent(message || ''));
         };
 
         // Resolve final WA target in client-side to avoid stale cached HTML values.
@@ -187,7 +230,7 @@ function tampilan_baru()
             return {
               isAds: isAds,
               greeting: isAds ? greeting : 'v0',
-              url: `https://wa.me/${number}?text=${encodeURIComponent(message)}`
+              url: buildWhatsAppUrl(number, message)
             };
           } catch (err) {
             console.error('WA Logic Error:', err);
@@ -195,7 +238,7 @@ function tampilan_baru()
             return {
               isAds: false,
               greeting: 'v0',
-              url: waFloat.href || 'https://wa.me/6285701216057'
+              url: waFloat.href || buildWhatsAppUrl('6285701216057', 'Hallo, Saya tertarik buat website di Velocity Developer [v0]. Mohon infonya.')
             };
           }
         };
