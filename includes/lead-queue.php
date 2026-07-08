@@ -75,6 +75,17 @@ function vd_get_lead_retry_delays()
   return [30, 120, 600, 1800];
 }
 
+function vd_prepare_rekap_jenis_website($value)
+{
+  $value = sanitize_textarea_field((string) $value);
+
+  if (function_exists('mb_substr')) {
+    return mb_substr($value, 0, 191);
+  }
+
+  return substr($value, 0, 191);
+}
+
 function vd_prepare_lead_queue_payload($payload)
 {
   $payload = wp_parse_args(
@@ -424,6 +435,7 @@ function vd_process_lead_queue_job($queue_id = 0)
   $wa_result = validasi_no_wa($queue_row->no_whatsapp);
   $now = current_time('mysql');
   $rekap_form_id = (int) $queue_row->rekap_form_id;
+  $rekap_jenis_website = vd_prepare_rekap_jenis_website($queue_row->jenis_website);
 
   if ($rekap_form_id <= 0) {
     $inserted = $wpdb->insert(
@@ -431,7 +443,7 @@ function vd_process_lead_queue_job($queue_id = 0)
       [
         'nama' => $queue_row->nama,
         'no_whatsapp' => $queue_row->no_whatsapp,
-        'jenis_website' => $queue_row->jenis_website,
+        'jenis_website' => $rekap_jenis_website,
         'ai_result' => $ai_result,
         'via' => $queue_row->via,
         'utm_content' => $queue_row->utm_content,
