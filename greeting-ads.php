@@ -15,11 +15,15 @@ if (!defined('ABSPATH')) {
 define('GREETING_ADS_TABLE', 'greeting_ads_data');
 define('VD_WA_CLICKS_TABLE', 'vd_whatsapp_clicks');
 define('VD_WA_CLICKS_SCHEMA_VERSION', '2.1.0');
+define('VD_FORM_FUNNEL_TABLE', 'vd_form_funnel');
+define('VD_FORM_FUNNEL_SCHEMA_VERSION', '1.0.0');
 
 // Memuat file tambahan
 require_once plugin_dir_path(__FILE__) . 'includes/import-csv.php';
 require_once plugin_dir_path(__FILE__) . 'includes/crud-functions.php';
 require_once plugin_dir_path(__FILE__) . 'includes/function.php';
+require_once plugin_dir_path(__FILE__) . 'includes/lead-queue.php';
+require_once plugin_dir_path(__FILE__) . 'includes/form-funnel.php';
 require_once plugin_dir_path(__FILE__) . 'includes/ajax.php';
 require_once plugin_dir_path(__FILE__) . 'includes/form-chat.php';
 require_once plugin_dir_path(__FILE__) . 'includes/floating-whatsapp.php';
@@ -78,6 +82,8 @@ function greeting_ads_create_table()
 
     // Ensure WhatsApp clicks table is ready with latest schema.
     vd_maybe_upgrade_whatsapp_clicks_table(true);
+    vd_maybe_upgrade_lead_queue_table(true);
+    vd_maybe_upgrade_form_funnel_table(true);
 }
 
 // Hook untuk menghapus tabel saat plugin dihapus

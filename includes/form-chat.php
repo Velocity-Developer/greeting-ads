@@ -110,6 +110,77 @@ function chat_form_new($atts)
     jQuery(function($) {
       let webLength = <?php echo $atts['weblength']; ?>;
       let pushSettings = "<?php echo $atts['push']; ?>".split(",").map(item => item.trim());
+      const funnelAjaxUrl = "<?php echo admin_url('admin-ajax.php'); ?>";
+      const funnelStoragePrefix = "vd_form_funnel_";
+      const getDevice = navigator.userAgent.match(/Android|BlackBerry|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i);
+      const device = getDevice ? "mobile" : "pc";
+      const formSessionKey = getOrCreateFormSessionKey();
+
+      function getOrCreateFormSessionKey() {
+        const storageKey = funnelStoragePrefix + "session_key";
+        let sessionKey = sessionStorage.getItem(storageKey);
+        if (!sessionKey) {
+          sessionKey = "ffs_" + Date.now() + "_" + Math.random().toString(36).slice(2, 10);
+          sessionStorage.setItem(storageKey, sessionKey);
+        }
+        return sessionKey;
+      }
+
+      function buildTrackedFlag(eventType) {
+        return funnelStoragePrefix + eventType + "_" + window.location.pathname;
+      }
+
+      function trackFormEvent(eventType, persistOnce) {
+        const trackedFlag = buildTrackedFlag(eventType);
+        if (persistOnce && sessionStorage.getItem(trackedFlag) === "1") {
+          return;
+        }
+
+        const payload = new URLSearchParams({
+          action: "vd_track_form_funnel_event",
+          event_type: eventType,
+          session_key: formSessionKey,
+          page_url: window.location.href,
+          device: device
+        });
+
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(funnelAjaxUrl, payload);
+        } else {
+          fetch(funnelAjaxUrl, {
+            method: "POST",
+            body: payload,
+            keepalive: true,
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+            }
+          }).catch(function() {});
+        }
+
+        if (persistOnce) {
+          sessionStorage.setItem(trackedFlag, "1");
+        }
+      }
+
+      trackFormEvent("form_view", true);
+
+      let formStartTracked = false;
+      let submitEnabledTracked = false;
+      function ensureFormStartTracked() {
+        if (formStartTracked) {
+          return;
+        }
+        formStartTracked = true;
+        trackFormEvent("form_start", true);
+      }
+
+      function ensureSubmitEnabledTracked() {
+        if (submitEnabledTracked) {
+          return;
+        }
+        submitEnabledTracked = true;
+        trackFormEvent("submit_enabled", true);
+      }
 
       function validateInputsNew() {
         let nama = $("#input-nama-new").val().trim();
@@ -148,11 +219,14 @@ function chat_form_new($atts)
         }
 
         // Enable button jika nama, wa, dan website valid
-        if (nama.length >= 3 && wa.length >= waLength && wa.substring(0, 2) === "08" && website.length >= webLength && getCookie("dilarang") !== "true") {
+        // Bypass kondisi AI/cookie dilarang karena validasi AI sedang dinonaktifkan.
+        // if (nama.length >= 3 && wa.length >= waLength && wa.substring(0, 2) === "08" && website.length >= webLength && getCookie("dilarang") !== "true") {
+        if (nama.length >= 3 && wa.length >= waLength && wa.substring(0, 2) === "08" && website.length >= webLength) {
           $(".button-green")
             .removeClass("disable")
             .addClass("enable")
             .prop("disabled", false);
+          ensureSubmitEnabledTracked();
           valid = true; // Override valid untuk allow submission
         } else {
           $(".button-green")
@@ -165,6 +239,7 @@ function chat_form_new($atts)
       }
 
       $(".input-control").on("input", validateInputsNew);
+      $(".input-control").one("focus input", ensureFormStartTracked);
 
       $("#form-chat-new").on("submit", function(e) {
         e.preventDefault();
@@ -179,8 +254,7 @@ function chat_form_new($atts)
         const nama = $("#input-nama-new").val().trim();
         const whatsapp = $("#input-whatsapp-new").val().trim();
         const website = $("#jenis-website-new").val().trim();
-        const getDevice = navigator.userAgent.match(/Android|BlackBerry|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i);
-        const device = getDevice ? "mobile" : "pc";
+        trackFormEvent("submit_click", false);
 
         $.post(
           "<?php echo admin_url('admin-ajax.php'); ?>", {
@@ -196,22 +270,12 @@ function chat_form_new($atts)
           function(response) {
 
             if (response.success) {
-              if (response.data.ai_result === 'dilarang') {
-                // jika dilarang simpan di cookie kalau user ini terlarang
-                if (getCookie("dilarang") == null) {
-                  setCookie("dilarang", "true", 30);
-                }
-                $(".button-green")
-                  .removeClass("enable")
-                  .addClass("disable")
-                  .prop("disabled", true);
-                $("#info-new").text("Data tidak valid.").css("color", "red");
-              } else if (response.data.ai_result === 'valid') {
+              // Bypass kondisi ai_result === 'valid' karena validasi AI sedang dimatikan.
+              // if (response.data.ai_result === 'dilarang') { ... }
+              // else if (response.data.ai_result === 'valid') {
                 $("#form-chat-new").trigger("reset");
-                // jika ada cookie dilarang maka datalayer tidak dikirim
-                // Hanya kirim dataLayer jika website minimal 27 karakter
-                // Dan device sesuai dengan setting push
-                if (getCookie("dilarang") == null && website.length >= webLength && pushSettings.includes(device)) {
+                // Bypass kondisi cookie dilarang. Tetap jaga syarat panjang input dan device.
+                if (website.length >= webLength && pushSettings.includes(device)) {
                   dataLayer.push({
                     event: 'klik_<?php echo $kondisi_gtag; ?>',
                     button_id: '<?php echo $kondisi_gtag; ?>',
@@ -229,9 +293,7 @@ function chat_form_new($atts)
                 }, 350);
 
                 // $("#info-new").text("Submit data berhasil").css("color", "green");
-              } else {
-                $("#info-new").text("Data tidak valid").css("color", "red");
-              }
+              // }
 
               // timeout 3 detik
               setTimeout(function() {
@@ -243,7 +305,15 @@ function chat_form_new($atts)
               '<span class="icon-wa"><svg xmlns="http://www.w3.org/2000/svg" style="margin-bottom:-3px;margin-right:5px;" width="16" height="16" fill="currentColor" class="bi bi-whatsapp" viewBox="0 0 16 16"><path d="M13.601 2.326A7.854 7.854 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.933 7.933 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.898 7.898 0 0 0 13.6 2.326zM7.994 14.521a6.573 6.573 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.557 6.557 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592zm3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.729.729 0 0 0-.529.247c-.182.198-.691.677-.691 1.654 0 .977.71 1.916.81 2.049.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232z" /></svg></span><span>Whatsapp</span>'
             );
           }
-        );
+        ).fail(function() {
+          $(".frame-btn button").html(
+            '<span class="icon-wa"><svg xmlns="http://www.w3.org/2000/svg" style="margin-bottom:-3px;margin-right:5px;" width="16" height="16" fill="currentColor" class="bi bi-whatsapp" viewBox="0 0 16 16"><path d="M13.601 2.326A7.854 7.854 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.933 7.933 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.898 7.898 0 0 0 13.6 2.326zM7.994 14.521a6.573 6.573 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.557 6.557 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592zm3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.729.729 0 0 0-.529.247c-.182.198-.691.677-.691 1.654 0 .977.71 1.916.81 2.049.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232z" /></svg></span><span>Whatsapp</span>'
+          );
+
+          var fallbackUrl = "<?php echo esc_js($redirect_url); ?>";
+          fallbackUrl = fallbackUrl.replace('jeniswebsite', website);
+          window.open(fallbackUrl, '_blank');
+        });
       });
 
       function getCookie(name) {

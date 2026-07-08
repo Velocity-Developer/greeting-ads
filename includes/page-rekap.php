@@ -24,6 +24,24 @@ function velocity_add_admin_page()
 
   add_submenu_page(
     'rekap-chat-form',
+    'Lead Queue',
+    'Lead Queue',
+    'manage_options',
+    'rekap-lead-queue',
+    'velocity_render_lead_queue_page'
+  );
+
+  add_submenu_page(
+    'rekap-chat-form',
+    'Funnel Form',
+    'Funnel Form',
+    'manage_options',
+    'rekap-form-funnel',
+    'velocity_render_form_funnel_page'
+  );
+
+  add_submenu_page(
+    'rekap-chat-form',
     'Settings WhatsApp',
     'Settings',
     'manage_options',
@@ -676,6 +694,53 @@ function format_status($status)
   }
 }
 
+function velocity_format_tanggal_indonesia($datetime_value)
+{
+  if (empty($datetime_value)) {
+    return '-';
+  }
+
+  $timestamp = strtotime((string) $datetime_value);
+  if (!$timestamp) {
+    return esc_html((string) $datetime_value);
+  }
+
+  $bulan = [
+    1 => 'Januari',
+    2 => 'Februari',
+    3 => 'Maret',
+    4 => 'April',
+    5 => 'Mei',
+    6 => 'Juni',
+    7 => 'Juli',
+    8 => 'Agustus',
+    9 => 'September',
+    10 => 'Oktober',
+    11 => 'November',
+    12 => 'Desember',
+  ];
+
+  $hari = (int) date('j', $timestamp);
+  $bulan_index = (int) date('n', $timestamp);
+  $tahun = date('Y', $timestamp);
+
+  return $hari . ' ' . $bulan[$bulan_index] . ' ' . $tahun;
+}
+
+function velocity_format_tanggal_waktu_indonesia($datetime_value)
+{
+  if (empty($datetime_value)) {
+    return '-';
+  }
+
+  $timestamp = strtotime((string) $datetime_value);
+  if (!$timestamp) {
+    return esc_html((string) $datetime_value);
+  }
+
+  return velocity_format_tanggal_indonesia($datetime_value) . ' ' . date('H:i:s', $timestamp);
+}
+
 function velocity_render_whatsapp_clicks_page()
 {
   global $wpdb;
@@ -685,9 +750,19 @@ function velocity_render_whatsapp_clicks_page()
 
   $today = wp_date('Y-m-d');
   $yesterday = wp_date('Y-m-d', strtotime('-1 day', strtotime($today)));
+  $default_from_date = wp_date('Y-m-d', strtotime('-29 days', strtotime($today)));
 
-  $from_date = isset($_GET['from_date']) ? sanitize_text_field($_GET['from_date']) : '';
-  $to_date = isset($_GET['to_date']) ? sanitize_text_field($_GET['to_date']) : '';
+  $from_date = isset($_GET['from_date']) ? sanitize_text_field($_GET['from_date']) : $default_from_date;
+  $to_date = isset($_GET['to_date']) ? sanitize_text_field($_GET['to_date']) : $today;
+  if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from_date)) {
+    $from_date = $default_from_date;
+  }
+  if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to_date)) {
+    $to_date = $today;
+  }
+  if ($from_date > $to_date) {
+    [$from_date, $to_date] = [$to_date, $from_date];
+  }
   $show_v0 = isset($_GET['show_v0']) && sanitize_text_field($_GET['show_v0']) === '1';
 
   if (isset($_POST['vd_wa_bulk_action']) && $_POST['vd_wa_bulk_action'] === 'delete' && !empty($_POST['vd_selected_ids'])) {
@@ -749,64 +824,27 @@ function velocity_render_whatsapp_clicks_page()
       )
     );
 
-    $month_count = (int) $wpdb->get_var(
-      $wpdb->prepare(
-        "SELECT COUNT(DISTINCT ip_address) FROM $table_name WHERE YEAR(created_at) = YEAR(%s) AND MONTH(created_at) = MONTH(%s) AND ip_address <> ''$greeting_filter_sql",
-        $today,
-        $today
-      )
-    );
-
+    $period_label = (isset($_GET['from_date']) || isset($_GET['to_date'])) ? 'Periode Filter' : '30 Hari Terakhir';
     $per_page = 30;
     $current_page = isset($_GET['paged']) ? max(1, intval($_GET['paged'])) : 1;
     $offset = ($current_page - 1) * $per_page;
-
-    $where = "WHERE 1=1";
+    $where = "WHERE ip_address <> ''";
     $where_params = [];
 
     if ($has_greeting && !$show_v0) {
       $where .= " AND (greeting IS NULL OR greeting <> 'v0')";
     }
 
-    if (!empty($from_date)) {
-      $where .= " AND DATE(created_at) >= %s";
-      $where_params[] = $from_date;
-    }
+    $where .= " AND DATE(created_at) >= %s AND DATE(created_at) <= %s";
+    $where_params[] = $from_date;
+    $where_params[] = $to_date;
 
-    if (!empty($to_date)) {
-      $where .= " AND DATE(created_at) <= %s";
-      $where_params[] = $to_date;
-    }
-
-    if (!empty($where_params)) {
-      $total_items = (int) $wpdb->get_var(
-        $wpdb->prepare(
-          "SELECT COUNT(*) FROM $table_name $where",
-          $where_params
-        )
-      );
-    } else {
-      $total_items = (int) $wpdb->get_var("SELECT COUNT(*) FROM $table_name $where");
-    }
-
+    $period_unique_count = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(DISTINCT ip_address) FROM $table_name $where", $where_params));
+    $period_total_count = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table_name $where", $where_params));
+    $daily_summary = $wpdb->get_results($wpdb->prepare("SELECT DATE(created_at) AS summary_date, COUNT(DISTINCT ip_address) AS unique_ips, COUNT(*) AS total_clicks FROM $table_name $where GROUP BY DATE(created_at) ORDER BY summary_date DESC", $where_params));
+    $total_items = $period_total_count;
     $total_pages = max(1, ceil($total_items / $per_page));
-
-    if (!empty($where_params)) {
-      $latest_clicks = $wpdb->get_results(
-        $wpdb->prepare(
-          "SELECT $select_columns FROM $table_name $where ORDER BY created_at DESC LIMIT %d OFFSET %d",
-          ...array_merge($where_params, [$per_page, $offset])
-        )
-      );
-    } else {
-      $latest_clicks = $wpdb->get_results(
-        $wpdb->prepare(
-          "SELECT $select_columns FROM $table_name $where ORDER BY created_at DESC LIMIT %d OFFSET %d",
-          $per_page,
-          $offset
-        )
-      );
-    }
+    $latest_clicks = $wpdb->get_results($wpdb->prepare("SELECT $select_columns FROM $table_name $where ORDER BY created_at DESC LIMIT %d OFFSET %d", ...array_merge($where_params, [$per_page, $offset])));
 ?>
 
 <style>
@@ -870,52 +908,22 @@ function velocity_render_whatsapp_clicks_page()
   }
 </style>
 
-<div class="vd-summary-grid">
-  <div class="vd-summary-card">
-    <div class="vd-summary-label">Hari ini</div>
-    <div class="vd-summary-value"><?php echo esc_html($today_count); ?></div>
-    <div class="vd-summary-caption">Jumlah IP unik pada tanggal <?php echo esc_html($today); ?></div>
-  </div>
-  <div class="vd-summary-card">
-    <div class="vd-summary-label">Kemarin</div>
-    <div class="vd-summary-value"><?php echo esc_html($yesterday_count); ?></div>
-    <div class="vd-summary-caption">Jumlah IP unik pada tanggal <?php echo esc_html($yesterday); ?></div>
-  </div>
-  <div class="vd-summary-card">
-    <div class="vd-summary-label">Bulan ini</div>
-    <div class="vd-summary-value"><?php echo esc_html($month_count); ?></div>
-    <div class="vd-summary-caption">Total IP unik di bulan ini</div>
-  </div>
-  <div class="vd-summary-card">
-    <div class="vd-summary-label">Total</div>
-    <div class="vd-summary-value"><?php echo esc_html($total_all); ?></div>
-    <div class="vd-summary-caption">Total semua IP unik yang terekam</div>
-  </div>
-</div>
-<h2 style="margin-top: 30px;">Klik Terbaru</h2>
-
-<form method="get" style="margin-bottom: 15px; display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+<form method="get" style="margin: 18px 0 15px; display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
   <input type="hidden" name="page" value="rekap-whatsapp-clicks">
-  <div>
-    <label for="from_date">Dari tanggal</label><br>
-    <input type="date" id="from_date" name="from_date" value="<?php echo esc_attr($from_date); ?>">
-  </div>
-  <div>
-    <label for="to_date">Sampai tanggal</label><br>
-    <input type="date" id="to_date" name="to_date" value="<?php echo esc_attr($to_date); ?>">
-  </div>
-  <div>
-    <label for="show_v0" style="display:block;">&nbsp;</label>
-    <label style="display:flex;gap:6px;align-items:center;">
-      <input type="checkbox" id="show_v0" name="show_v0" value="1" <?php checked($show_v0, true); ?>>
-      Tampilkan organik (v0)
-    </label>
-  </div>
-  <div>
-    <button type="submit" class="button button-primary">Filter</button>
-    <a href="<?php echo esc_url(admin_url('admin.php?page=rekap-whatsapp-clicks')); ?>" class="button">Reset</a>
-  </div>
+  <div><label for="from_date">Dari tanggal</label><br><input type="date" id="from_date" name="from_date" value="<?php echo esc_attr($from_date); ?>"></div>
+  <div><label for="to_date">Sampai tanggal</label><br><input type="date" id="to_date" name="to_date" value="<?php echo esc_attr($to_date); ?>"></div>
+  <div><label for="show_v0" style="display:block;">&nbsp;</label><label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" id="show_v0" name="show_v0" value="1" <?php checked($show_v0, true); ?>>Tampilkan organik (v0)</label></div>
+  <div><button type="submit" class="button button-primary">Terapkan Filter</button> <a href="<?php echo esc_url(admin_url('admin.php?page=rekap-whatsapp-clicks')); ?>" class="button">Reset</a></div>
 </form>
+<div class="vd-summary-grid">
+  <div class="vd-summary-card"><div class="vd-summary-label">Hari ini</div><div class="vd-summary-value"><?php echo esc_html($today_count); ?></div><div class="vd-summary-caption">IP unik pada <?php echo esc_html($today); ?></div></div>
+  <div class="vd-summary-card"><div class="vd-summary-label">Kemarin</div><div class="vd-summary-value"><?php echo esc_html($yesterday_count); ?></div><div class="vd-summary-caption">IP unik pada <?php echo esc_html($yesterday); ?></div></div>
+  <div class="vd-summary-card"><div class="vd-summary-label"><?php echo esc_html($period_label); ?></div><div class="vd-summary-value"><?php echo esc_html($period_unique_count); ?></div><div class="vd-summary-caption">IP unik <?php echo esc_html($from_date); ?> s/d <?php echo esc_html($to_date); ?></div></div>
+  <div class="vd-summary-card"><div class="vd-summary-label">Klik di Periode</div><div class="vd-summary-value"><?php echo esc_html($period_total_count); ?></div><div class="vd-summary-caption">Total klik <?php echo esc_html($from_date); ?> s/d <?php echo esc_html($to_date); ?></div></div>
+</div>
+<h2 style="margin-top: 24px;">Summary Harian</h2>
+<table class="widefat striped" style="max-width:720px;margin-bottom:24px;"><thead><tr><th>Tanggal</th><th>IP Unik</th><th>Total Klik</th></tr></thead><tbody><?php if ($daily_summary): foreach ($daily_summary as $row): ?><tr><td><?php echo esc_html($row->summary_date); ?></td><td><?php echo esc_html($row->unique_ips); ?></td><td><?php echo esc_html($row->total_clicks); ?></td></tr><?php endforeach; else: ?><tr><td colspan="3">Belum ada data untuk periode ini.</td></tr><?php endif; ?></tbody></table>
+<h2 style="margin-top: 30px;">Detail Klik</h2>
 
 <?php if ($latest_clicks): ?>
   <form method="post">
@@ -1352,4 +1360,547 @@ function velocity_render_whatsapp_clicks_page()
 </script>
 </div>
 <?php
+}
+
+function velocity_render_form_funnel_page()
+{
+  if (!current_user_can('manage_options')) {
+    return;
+  }
+
+  global $wpdb;
+  $table_name = $wpdb->prefix . VD_FORM_FUNNEL_TABLE;
+  $table_exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table_name));
+
+  $today = wp_date('Y-m-d');
+  $default_from_date = wp_date('Y-m-d', strtotime('-29 days', strtotime($today)));
+
+  $from_date = isset($_GET['from_date']) ? sanitize_text_field(wp_unslash($_GET['from_date'])) : $default_from_date;
+  $to_date = isset($_GET['to_date']) ? sanitize_text_field(wp_unslash($_GET['to_date'])) : $today;
+  if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from_date)) {
+    $from_date = $default_from_date;
+  }
+  if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to_date)) {
+    $to_date = $today;
+  }
+  if ($from_date > $to_date) {
+    [$from_date, $to_date] = [$to_date, $from_date];
+  }
+
+  $selected_event = isset($_GET['event_type']) ? sanitize_text_field(wp_unslash($_GET['event_type'])) : '';
+  $allowed_events = ['form_view', 'form_start', 'submit_enabled', 'submit_click'];
+  if (!in_array($selected_event, $allowed_events, true)) {
+    $selected_event = '';
+  }
+
+  $selected_traffic = isset($_GET['traffic_source']) ? sanitize_text_field(wp_unslash($_GET['traffic_source'])) : 'ads';
+  $allowed_traffic = ['ads', 'organik', 'all'];
+  if (!in_array($selected_traffic, $allowed_traffic, true)) {
+    $selected_traffic = 'ads';
+  }
+
+  ?>
+  <div class="wrap">
+    <h1>Funnel Form</h1>
+    <p>Tracking internal web untuk memantau tahapan <code>klik_wa_floating</code>, <code>form_view</code>, <code>form_start</code>, <code>submit_enabled</code>, dan <code>submit_click</code>.</p>
+    <?php if (!$table_exists) : ?>
+      <p>Belum ada data funnel form yang terekam.</p>
+    </div>
+    <?php
+      return;
+    endif;
+
+    $where = 'WHERE DATE(created_at) >= %s AND DATE(created_at) <= %s';
+    $params = [$from_date, $to_date];
+    if ($selected_traffic !== 'all') {
+      $where .= ' AND traffic_source = %s';
+      $params[] = $selected_traffic;
+    }
+    if ($selected_event !== '') {
+      $where .= ' AND event_type = %s';
+      $params[] = $selected_event;
+    }
+
+    $summary_where = 'WHERE DATE(created_at) >= %s AND DATE(created_at) <= %s';
+    $summary_params = [$from_date, $to_date];
+    if ($selected_traffic !== 'all') {
+      $summary_where .= ' AND traffic_source = %s';
+      $summary_params[] = $selected_traffic;
+    }
+
+    $summary_rows = $wpdb->get_results(
+      $wpdb->prepare(
+        "SELECT event_type, COUNT(DISTINCT ip_address) AS total FROM $table_name $summary_where GROUP BY event_type",
+        ...$summary_params
+      ),
+      OBJECT_K
+    );
+
+    $summary_map = [];
+    foreach ($allowed_events as $event_type) {
+      $summary_map[$event_type] = isset($summary_rows[$event_type]) ? (int) $summary_rows[$event_type]->total : 0;
+    }
+
+    $wa_clicks_table = $wpdb->prefix . 'vd_whatsapp_clicks';
+    $wa_clicks_table_exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wa_clicks_table));
+    $floating_click_total = 0;
+    if ($wa_clicks_table_exists) {
+      $wa_where = 'WHERE DATE(created_at) >= %s AND DATE(created_at) <= %s AND ip_address <> %s';
+      $wa_params = [$from_date, $to_date, ''];
+      if ($selected_traffic === 'ads') {
+        $wa_where .= " AND greeting IS NOT NULL AND greeting <> '' AND greeting <> 'v0'";
+      } elseif ($selected_traffic === 'organik') {
+        $wa_where .= " AND greeting = 'v0'";
+      }
+
+      $floating_click_total = (int) $wpdb->get_var(
+        $wpdb->prepare(
+          "SELECT COUNT(DISTINCT ip_address) FROM $wa_clicks_table $wa_where",
+          ...$wa_params
+        )
+      );
+    }
+
+    $daily_rows = $wpdb->get_results(
+      $wpdb->prepare(
+        "SELECT DATE(created_at) AS summary_date,
+                COUNT(DISTINCT CASE WHEN event_type = 'form_view' THEN ip_address END) AS form_view,
+                COUNT(DISTINCT CASE WHEN event_type = 'form_start' THEN ip_address END) AS form_start,
+                COUNT(DISTINCT CASE WHEN event_type = 'submit_enabled' THEN ip_address END) AS submit_enabled,
+                COUNT(DISTINCT CASE WHEN event_type = 'submit_click' THEN ip_address END) AS submit_click
+         FROM $table_name
+         $summary_where
+         GROUP BY DATE(created_at)
+         ORDER BY summary_date DESC",
+        ...$summary_params
+      )
+    );
+
+    $daily_floating_clicks = [];
+    if ($wa_clicks_table_exists) {
+      $wa_daily_where = 'WHERE DATE(created_at) >= %s AND DATE(created_at) <= %s AND ip_address <> %s';
+      $wa_daily_params = [$from_date, $to_date, ''];
+      if ($selected_traffic === 'ads') {
+        $wa_daily_where .= " AND greeting IS NOT NULL AND greeting <> '' AND greeting <> 'v0'";
+      } elseif ($selected_traffic === 'organik') {
+        $wa_daily_where .= " AND greeting = 'v0'";
+      }
+
+      $daily_floating_rows = $wpdb->get_results(
+        $wpdb->prepare(
+          "SELECT DATE(created_at) AS summary_date, COUNT(DISTINCT ip_address) AS total_clicks
+           FROM $wa_clicks_table
+           $wa_daily_where
+           GROUP BY DATE(created_at)",
+          ...$wa_daily_params
+        )
+      );
+      foreach ($daily_floating_rows as $daily_floating_row) {
+        $daily_floating_clicks[$daily_floating_row->summary_date] = (int) $daily_floating_row->total_clicks;
+      }
+    }
+
+    $daily_funnel_map = [];
+    foreach ($daily_rows as $daily_row) {
+      $daily_funnel_map[$daily_row->summary_date] = [
+        'form_view' => (int) $daily_row->form_view,
+        'form_start' => (int) $daily_row->form_start,
+        'submit_enabled' => (int) $daily_row->submit_enabled,
+        'submit_click' => (int) $daily_row->submit_click,
+      ];
+    }
+
+    $daily_summary_dates = array_unique(array_merge(array_keys($daily_funnel_map), array_keys($daily_floating_clicks)));
+    rsort($daily_summary_dates);
+
+    $per_page = 30;
+    $current_page = isset($_GET['paged']) ? max(1, (int) $_GET['paged']) : 1;
+    $offset = ($current_page - 1) * $per_page;
+
+    $total_items = (int) ($params
+      ? $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table_name $where", ...$params))
+      : $wpdb->get_var("SELECT COUNT(*) FROM $table_name $where"));
+    $total_pages = max(1, (int) ceil($total_items / $per_page));
+
+    $rows = $wpdb->get_results(
+      $wpdb->prepare(
+        "SELECT id, event_type, session_key, ip_address, page_url, referer, device, greeting, traffic_source, label, utm_content, utm_medium, created_at
+         FROM $table_name
+         $where
+         ORDER BY created_at DESC
+         LIMIT %d OFFSET %d",
+        ...array_merge($params, [$per_page, $offset])
+      )
+    );
+
+    $base_args = ['page' => 'rekap-form-funnel', 'from_date' => $from_date, 'to_date' => $to_date, 'traffic_source' => $selected_traffic];
+    if ($selected_event !== '') {
+      $base_args['event_type'] = $selected_event;
+    }
+    ?>
+
+    <form method="get" style="margin: 18px 0 15px; display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+      <input type="hidden" name="page" value="rekap-form-funnel">
+      <div><label for="from_date">Dari tanggal</label><br><input type="date" id="from_date" name="from_date" value="<?php echo esc_attr($from_date); ?>"></div>
+      <div><label for="to_date">Sampai tanggal</label><br><input type="date" id="to_date" name="to_date" value="<?php echo esc_attr($to_date); ?>"></div>
+      <div>
+        <label for="traffic_source">Sumber Traffic</label><br>
+        <select name="traffic_source" id="traffic_source">
+          <option value="ads" <?php selected($selected_traffic, 'ads'); ?>>Ads</option>
+          <option value="organik" <?php selected($selected_traffic, 'organik'); ?>>Organik</option>
+          <option value="all" <?php selected($selected_traffic, 'all'); ?>>Semua</option>
+        </select>
+      </div>
+      <div>
+        <label for="event_type">Event</label><br>
+        <select name="event_type" id="event_type">
+          <option value="">Semua Event</option>
+          <?php foreach ($allowed_events as $event_type) : ?>
+            <option value="<?php echo esc_attr($event_type); ?>" <?php selected($selected_event, $event_type); ?>>
+              <?php echo esc_html($event_type); ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div><button type="submit" class="button button-primary">Terapkan Filter</button> <a href="<?php echo esc_url(admin_url('admin.php?page=rekap-form-funnel')); ?>" class="button">Reset</a></div>
+    </form>
+
+    <p style="margin-top:-4px; color:#50575e;">
+      Periode aktif: <strong><?php echo esc_html(velocity_format_tanggal_indonesia($from_date)); ?></strong> s/d <strong><?php echo esc_html(velocity_format_tanggal_indonesia($to_date)); ?></strong>
+    </p>
+
+    <div style="display:flex; gap:12px; flex-wrap:wrap; margin:16px 0 20px;">
+      <div style="background:#fff; border:1px solid #dcdcde; border-radius:8px; padding:12px 16px; min-width:140px;">
+        <div style="font-size:12px; color:#50575e; text-transform:uppercase;">klik_wa_floating</div>
+        <div style="font-size:24px; font-weight:600; line-height:1.2;"><?php echo intval($floating_click_total); ?></div>
+      </div>
+      <?php foreach ($summary_map as $event_type => $total) : ?>
+        <div style="background:#fff; border:1px solid #dcdcde; border-radius:8px; padding:12px 16px; min-width:140px;">
+          <div style="font-size:12px; color:#50575e; text-transform:uppercase;"><?php echo esc_html($event_type); ?></div>
+          <div style="font-size:24px; font-weight:600; line-height:1.2;"><?php echo intval($total); ?></div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+
+    <h2>Summary Harian</h2>
+    <table class="widefat striped" style="max-width:860px; margin-bottom:24px;">
+      <thead>
+        <tr>
+          <th>Tanggal</th>
+          <th>Klik WA Floating</th>
+          <th>Form View</th>
+          <th>Form Start</th>
+          <th>Tombol Aktif</th>
+          <th>Submit Click</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php if ($daily_summary_dates) : ?>
+          <?php foreach ($daily_summary_dates as $summary_date) : ?>
+            <?php
+            $daily_funnel = $daily_funnel_map[$summary_date] ?? [
+              'form_view' => 0,
+              'form_start' => 0,
+              'submit_enabled' => 0,
+              'submit_click' => 0,
+            ];
+            ?>
+            <tr>
+              <td><?php echo esc_html(velocity_format_tanggal_indonesia($summary_date)); ?></td>
+              <td><?php echo isset($daily_floating_clicks[$summary_date]) ? intval($daily_floating_clicks[$summary_date]) : 0; ?></td>
+              <td><?php echo intval($daily_funnel['form_view']); ?></td>
+              <td><?php echo intval($daily_funnel['form_start']); ?></td>
+              <td><?php echo intval($daily_funnel['submit_enabled']); ?></td>
+              <td><?php echo intval($daily_funnel['submit_click']); ?></td>
+            </tr>
+          <?php endforeach; ?>
+        <?php else : ?>
+          <tr><td colspan="6">Belum ada data untuk periode ini.</td></tr>
+        <?php endif; ?>
+      </tbody>
+    </table>
+
+    <h2>Detail Event</h2>
+    <table class="widefat striped" style="table-layout:fixed;">
+      <thead>
+        <tr>
+          <th style="width:60px;">ID</th>
+          <th style="width:140px;">Tanggal</th>
+          <th style="width:120px;">Event</th>
+          <th style="width:120px;">IP</th>
+          <th style="width:140px;">Session</th>
+          <th style="width:90px;">Device</th>
+          <th style="width:80px;">Traffic</th>
+          <th style="width:110px;">Greeting</th>
+          <th style="width:120px;">Label</th>
+          <th style="width:160px;">UTM</th>
+          <th>Page</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php if ($rows) : ?>
+          <?php foreach ($rows as $row) : ?>
+            <tr>
+              <td><?php echo intval($row->id); ?></td>
+              <td><?php echo esc_html(velocity_format_tanggal_waktu_indonesia($row->created_at)); ?></td>
+              <td><strong><?php echo esc_html($row->event_type); ?></strong></td>
+              <td><?php echo $row->ip_address ? esc_html($row->ip_address) : '-'; ?></td>
+              <td style="word-break:break-all;"><?php echo esc_html($row->session_key); ?></td>
+              <td><?php echo $row->device ? esc_html($row->device) : '-'; ?></td>
+              <td><?php echo $row->traffic_source ? esc_html($row->traffic_source) : '-'; ?></td>
+              <td><?php echo $row->greeting ? esc_html($row->greeting) : '-'; ?></td>
+              <td><?php echo $row->label ? esc_html($row->label) : '-'; ?></td>
+              <td><?php echo esc_html(trim(($row->utm_content ?: '-') . ' / ' . ($row->utm_medium ?: '-'), ' /')); ?></td>
+              <td style="word-break:break-word;">
+                <?php echo $row->page_url ? esc_html($row->page_url) : '-'; ?>
+                <?php if (!empty($row->referer)) : ?>
+                  <br><span style="color:#50575e; font-size:11px;"><?php echo esc_html($row->referer); ?></span>
+                <?php endif; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        <?php else : ?>
+          <tr><td colspan="11" style="text-align:center; padding:18px;">Belum ada data detail sesuai filter.</td></tr>
+        <?php endif; ?>
+      </tbody>
+    </table>
+
+    <?php if ($total_pages > 1) : ?>
+      <div class="tablenav bottom" style="margin-top:16px;">
+        <div class="tablenav-pages">
+          <?php for ($i = 1; $i <= $total_pages; $i++) : ?>
+            <?php $page_url = add_query_arg(array_merge($base_args, ['paged' => $i]), admin_url('admin.php')); ?>
+            <?php if ($i === $current_page) : ?>
+              <span class="page-numbers current" style="padding:10px;"><?php echo intval($i); ?></span>
+            <?php else : ?>
+              <a class="page-numbers" style="padding:10px;" href="<?php echo esc_url($page_url); ?>"><?php echo intval($i); ?></a>
+            <?php endif; ?>
+          <?php endfor; ?>
+        </div>
+      </div>
+    <?php endif; ?>
+  </div>
+  <?php
+}
+
+function velocity_render_lead_queue_page()
+{
+  if (!current_user_can('manage_options')) {
+    return;
+  }
+
+  global $wpdb;
+  $table_name = $wpdb->prefix . VD_LEAD_QUEUE_TABLE;
+
+  if (
+    isset($_GET['vd_queue_action'], $_GET['queue_id'], $_GET['_wpnonce']) &&
+    $_GET['vd_queue_action'] === 'retry'
+  ) {
+    $queue_id = (int) $_GET['queue_id'];
+    check_admin_referer('vd_retry_queue_' . $queue_id);
+
+    $retried = vd_requeue_lead_queue_job($queue_id);
+    if ($retried) {
+      echo '<div class="notice notice-success is-dismissible"><p>Queue #' . intval($queue_id) . ' dijadwalkan ulang untuk diproses.</p></div>';
+    } else {
+      echo '<div class="notice notice-error is-dismissible"><p>Queue #' . intval($queue_id) . ' gagal dijadwalkan ulang.</p></div>';
+    }
+  }
+
+  $selected_status = isset($_GET['queue_status']) ? sanitize_text_field(wp_unslash($_GET['queue_status'])) : '';
+  $search = isset($_GET['queue_search']) ? sanitize_text_field(wp_unslash($_GET['queue_search'])) : '';
+
+  $allowed_statuses = ['pending', 'processing', 'retrying', 'done', 'failed'];
+  if (!in_array($selected_status, $allowed_statuses, true)) {
+    $selected_status = '';
+  }
+
+  $where_clauses = ['1=1'];
+  $query_params = [];
+
+  if ($selected_status !== '') {
+    $where_clauses[] = 'process_status = %s';
+    $query_params[] = $selected_status;
+  }
+
+  if ($search !== '') {
+    $like = '%' . $wpdb->esc_like($search) . '%';
+    $where_clauses[] = '(event_id LIKE %s OR nama LIKE %s OR no_whatsapp LIKE %s OR jenis_website LIKE %s)';
+    array_push($query_params, $like, $like, $like, $like);
+  }
+
+  $where_sql = 'WHERE ' . implode(' AND ', $where_clauses);
+
+  $per_page = 30;
+  $current_page = isset($_GET['paged']) ? max(1, (int) $_GET['paged']) : 1;
+  $offset = ($current_page - 1) * $per_page;
+
+  $count_sql = "SELECT COUNT(*) FROM $table_name $where_sql";
+  $total_items = $query_params
+    ? (int) $wpdb->get_var($wpdb->prepare($count_sql, ...$query_params))
+    : (int) $wpdb->get_var($count_sql);
+  $total_pages = max(1, (int) ceil($total_items / $per_page));
+
+  $data_sql = "SELECT * FROM $table_name $where_sql ORDER BY created_at DESC LIMIT %d OFFSET %d";
+  $data_params = $query_params;
+  $data_params[] = $per_page;
+  $data_params[] = $offset;
+  $rows = $wpdb->get_results($wpdb->prepare($data_sql, ...$data_params));
+
+  $summary_rows = $wpdb->get_results("SELECT process_status, COUNT(*) AS total FROM $table_name GROUP BY process_status", OBJECT_K);
+  $summary_map = [];
+  foreach ($allowed_statuses as $status) {
+    $summary_map[$status] = isset($summary_rows[$status]) ? (int) $summary_rows[$status]->total : 0;
+  }
+
+  $base_args = ['page' => 'rekap-lead-queue'];
+  if ($selected_status !== '') {
+    $base_args['queue_status'] = $selected_status;
+  }
+  if ($search !== '') {
+    $base_args['queue_search'] = $search;
+  }
+  ?>
+  <div class="wrap">
+    <h1>Lead Queue</h1>
+    <p>Monitor proses lead yang masuk dulu ke queue sebelum diteruskan ke <code>rekap_form</code> dan Telegram.</p>
+
+    <div style="display:flex; gap:12px; flex-wrap:wrap; margin:16px 0 20px;">
+      <?php foreach ($summary_map as $status => $total) : ?>
+        <div style="background:#fff; border:1px solid #dcdcde; border-radius:8px; padding:12px 16px; min-width:120px;">
+          <div style="font-size:12px; color:#50575e; text-transform:uppercase;"><?php echo esc_html($status); ?></div>
+          <div style="font-size:24px; font-weight:600; line-height:1.2;"><?php echo intval($total); ?></div>
+        </div>
+      <?php endforeach; ?>
+      <div style="background:#fff; border:1px solid #dcdcde; border-radius:8px; padding:12px 16px; min-width:120px;">
+        <div style="font-size:12px; color:#50575e; text-transform:uppercase;">total</div>
+        <div style="font-size:24px; font-weight:600; line-height:1.2;"><?php echo intval($total_items); ?></div>
+      </div>
+    </div>
+
+    <form method="get" style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:16px;">
+      <input type="hidden" name="page" value="rekap-lead-queue">
+      <div>
+        <label for="queue_status" style="display:block; margin-bottom:4px;">Status</label>
+        <select name="queue_status" id="queue_status">
+          <option value="">Semua Status</option>
+          <?php foreach ($allowed_statuses as $status) : ?>
+            <option value="<?php echo esc_attr($status); ?>" <?php selected($selected_status, $status); ?>>
+              <?php echo esc_html(ucfirst($status)); ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div>
+        <label for="queue_search" style="display:block; margin-bottom:4px;">Cari</label>
+        <input type="text" id="queue_search" name="queue_search" value="<?php echo esc_attr($search); ?>" placeholder="Nama / No WA / Event ID" style="min-width:260px;">
+      </div>
+      <div>
+        <button type="submit" class="button button-primary">Terapkan Filter</button>
+        <a href="<?php echo esc_url(admin_url('admin.php?page=rekap-lead-queue')); ?>" class="button">Reset</a>
+      </div>
+    </form>
+
+    <table class="widefat striped" style="table-layout:fixed;">
+      <thead>
+        <tr>
+          <th style="width:60px;">ID</th>
+          <th style="width:140px;">Waktu</th>
+          <th style="width:160px;">Nama / WA</th>
+          <th>Jenis Website</th>
+          <th style="width:90px;">Status</th>
+          <th style="width:70px;">Retry</th>
+          <th style="width:90px;">Rekap ID</th>
+          <th style="width:110px;">Telegram</th>
+          <th style="width:120px;">Greeting</th>
+          <th style="width:120px;">Via</th>
+          <th style="width:220px;">Error</th>
+          <th style="width:90px;">Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php if ($rows) : ?>
+          <?php foreach ($rows as $row) : ?>
+            <tr>
+              <td><?php echo intval($row->id); ?></td>
+              <td>
+                <?php echo esc_html($row->created_at); ?>
+                <?php if (!empty($row->processed_at)) : ?>
+                  <br><span style="color:#50575e;">Selesai: <?php echo esc_html($row->processed_at); ?></span>
+                <?php endif; ?>
+              </td>
+              <td>
+                <strong><?php echo esc_html($row->nama); ?></strong>
+                <br><?php echo esc_html($row->no_whatsapp); ?>
+                <br><span style="color:#50575e; font-size:11px;"><?php echo esc_html($row->event_id); ?></span>
+              </td>
+              <td><?php echo esc_html($row->jenis_website); ?></td>
+              <td><strong><?php echo esc_html($row->process_status); ?></strong></td>
+              <td><?php echo intval($row->retry_count); ?></td>
+              <td><?php echo $row->rekap_form_id ? intval($row->rekap_form_id) : '-'; ?></td>
+              <td><?php echo $row->telegram_status ? esc_html($row->telegram_status) : '-'; ?></td>
+              <td>
+                <?php echo $row->greeting ? esc_html($row->greeting) : '-'; ?>
+                <?php if (!empty($row->label)) : ?>
+                  <br><span style="color:#50575e;"><?php echo esc_html($row->label); ?></span>
+                <?php endif; ?>
+              </td>
+              <td>
+                <?php echo $row->via ? esc_html($row->via) : '-'; ?>
+                <?php if (!empty($row->utm_content) || !empty($row->utm_medium)) : ?>
+                  <br><span style="color:#50575e; font-size:11px;"><?php echo esc_html(trim($row->utm_content . ' / ' . $row->utm_medium, ' /')); ?></span>
+                <?php endif; ?>
+              </td>
+              <td><?php echo $row->last_error ? esc_html($row->last_error) : '-'; ?></td>
+              <td>
+                <?php if (in_array($row->process_status, ['pending', 'retrying', 'failed'], true)) : ?>
+                  <?php
+                  $retry_url = wp_nonce_url(
+                    add_query_arg(
+                      array_merge($base_args, [
+                        'vd_queue_action' => 'retry',
+                        'queue_id' => (int) $row->id,
+                        'paged' => $current_page,
+                      ]),
+                      admin_url('admin.php')
+                    ),
+                    'vd_retry_queue_' . (int) $row->id
+                  );
+                  ?>
+                  <a class="button button-small" href="<?php echo esc_url($retry_url); ?>">Proses Ulang</a>
+                <?php else : ?>
+                  -
+                <?php endif; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        <?php else : ?>
+          <tr>
+            <td colspan="12" style="text-align:center; padding:18px;">Belum ada data lead queue sesuai filter.</td>
+          </tr>
+        <?php endif; ?>
+      </tbody>
+    </table>
+
+    <?php if ($total_pages > 1) : ?>
+      <div class="tablenav" style="margin-top:16px;">
+        <div class="tablenav-pages">
+          <?php for ($i = 1; $i <= $total_pages; $i++) : ?>
+            <?php
+            $page_url = add_query_arg(
+              array_merge($base_args, ['paged' => $i]),
+              admin_url('admin.php')
+            );
+            ?>
+            <?php if ($i === $current_page) : ?>
+              <span class="page-numbers current" style="padding:10px;"><?php echo intval($i); ?></span>
+            <?php else : ?>
+              <a class="page-numbers" style="padding:10px;" href="<?php echo esc_url($page_url); ?>"><?php echo intval($i); ?></a>
+            <?php endif; ?>
+          <?php endfor; ?>
+        </div>
+      </div>
+    <?php endif; ?>
+  </div>
+  <?php
 }
