@@ -89,6 +89,7 @@ function rekap_chat_form()
   // AI saat ini memang nonaktif dari validasi_jenis_web(), jadi respons tetap ringan.
   $ai_result = validasi_jenis_web($jenis_website);
   $wa_result = validasi_no_wa($no_whatsapp);
+  $conversion_tracking = vd_evaluate_conversion_tracking($jenis_website);
 
   $payload = [
     'nama' => $nama,
@@ -112,7 +113,9 @@ function rekap_chat_form()
       'wa_result' => $wa_result,
       'pesan' => 'Lead masuk ke queue.',
       'queue_id' => $queue_result['queue_id'],
-      'process_mode' => 'queue'
+      'process_mode' => 'queue',
+      'should_track_conversion' => $conversion_tracking['should_track'],
+      'conversion_tracking_status' => $conversion_tracking['status_label'],
     ]);
   }
 
@@ -123,6 +126,10 @@ function rekap_chat_form()
     . "Jenis Web: <b>{$jenis_website}</b>\n"
     . "Greeting: <b>{$greeting}</b>\n"
     . "Sumber: <b>{$sumber}</b>\n"
+    . "Status Konversi: <b>{$conversion_tracking['status_label']}</b>\n"
+    . (!$conversion_tracking['should_track'] && $conversion_tracking['matched_keyword'] !== ''
+      ? "Frasa Pemicu: <b>{$conversion_tracking['matched_keyword']}</b>\n"
+      : '')
     . "label: <b>{$label}</b>\n\n"
     . "gclid: <b>{$gclid}</b>\n";
 
@@ -169,7 +176,9 @@ function rekap_chat_form()
     'ai_result' => $ai_result,
     'wa_result' => $wa_result,
     'pesan' => $pesan,
-    'process_mode' => 'sync_fallback'
+    'process_mode' => 'sync_fallback',
+    'should_track_conversion' => $conversion_tracking['should_track'],
+    'conversion_tracking_status' => $conversion_tracking['status_label'],
   ]);
 
 }

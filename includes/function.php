@@ -277,3 +277,121 @@ function validasi_no_wa($no_wa)
   }
   return 'valid';
 }
+
+function vd_sanitize_conversion_blacklist_enabled($value)
+{
+  return $value === '1' ? '1' : '0';
+}
+
+function vd_sanitize_conversion_blacklist_keywords($value)
+{
+  $value = is_string($value) ? wp_unslash($value) : '';
+  $lines = preg_split('/\r\n|\r|\n/', $value);
+  if (!is_array($lines)) {
+    return '';
+  }
+
+  $sanitized = [];
+  foreach ($lines as $line) {
+    $line = sanitize_text_field($line);
+    $line = preg_replace('/\s+/u', ' ', trim((string) $line));
+    if ($line === '') {
+      continue;
+    }
+
+    $sanitized[] = $line;
+  }
+
+  $sanitized = array_values(array_unique($sanitized));
+
+  return implode("\n", $sanitized);
+}
+
+function vd_get_conversion_blacklist_enabled()
+{
+  return get_option('vd_conversion_blacklist_enabled', '0') === '1';
+}
+
+function vd_get_conversion_blacklist_keywords()
+{
+  $raw_value = get_option('vd_conversion_blacklist_keywords', '');
+  $raw_value = is_string($raw_value) ? $raw_value : '';
+
+  $lines = preg_split('/\r\n|\r|\n/', $raw_value);
+  if (!is_array($lines)) {
+    return [];
+  }
+
+  $keywords = [];
+  foreach ($lines as $line) {
+    $normalized_line = vd_normalize_conversion_blacklist_text($line);
+    if ($normalized_line === '') {
+      continue;
+    }
+
+    $keywords[] = $normalized_line;
+  }
+
+  return array_values(array_unique($keywords));
+}
+
+function vd_normalize_conversion_blacklist_text($text)
+{
+  $text = is_string($text) ? $text : '';
+  $text = sanitize_text_field(wp_unslash($text));
+  $text = preg_replace('/\s+/u', ' ', trim($text));
+
+  if ($text === '') {
+    return '';
+  }
+
+  if (function_exists('mb_strtolower')) {
+    return mb_strtolower($text, 'UTF-8');
+  }
+
+  return strtolower($text);
+}
+
+function vd_text_contains_phrase($haystack, $needle)
+{
+  if ($haystack === '' || $needle === '') {
+    return false;
+  }
+
+  if (function_exists('mb_stripos')) {
+    return mb_stripos($haystack, $needle, 0, 'UTF-8') !== false;
+  }
+
+  return stripos($haystack, $needle) !== false;
+}
+
+function vd_evaluate_conversion_tracking($jenis_website)
+{
+  $normalized_text = vd_normalize_conversion_blacklist_text($jenis_website);
+  $blacklist_enabled = vd_get_conversion_blacklist_enabled();
+  $blacklist_keywords = vd_get_conversion_blacklist_keywords();
+
+  $result = [
+    'should_track' => true,
+    'status_label' => 'Dilacak',
+    'matched_keyword' => '',
+    'blacklist_enabled' => $blacklist_enabled,
+  ];
+
+  if (!$blacklist_enabled || $normalized_text === '' || empty($blacklist_keywords)) {
+    return $result;
+  }
+
+  foreach ($blacklist_keywords as $keyword) {
+    if (!vd_text_contains_phrase($normalized_text, $keyword)) {
+      continue;
+    }
+
+    $result['should_track'] = false;
+    $result['status_label'] = 'Tidak Dilacak';
+    $result['matched_keyword'] = $keyword;
+    return $result;
+  }
+
+  return $result;
+}

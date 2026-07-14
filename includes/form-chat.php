@@ -275,7 +275,8 @@ function chat_form_new($atts)
               // else if (response.data.ai_result === 'valid') {
                 $("#form-chat-new").trigger("reset");
                 // Bypass kondisi cookie dilarang. Tetap jaga syarat panjang input dan device.
-                if (website.length >= webLength && pushSettings.includes(device)) {
+                const shouldTrackConversion = !(response.data && response.data.should_track_conversion === false);
+                if (website.length >= webLength && pushSettings.includes(device) && shouldTrackConversion) {
                   dataLayer.push({
                     event: 'klik_<?php echo $kondisi_gtag; ?>',
                     button_id: '<?php echo $kondisi_gtag; ?>',

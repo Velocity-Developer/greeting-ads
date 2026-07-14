@@ -42,6 +42,15 @@ function velocity_add_admin_page()
 
   add_submenu_page(
     'rekap-chat-form',
+    'Blacklist Kata Konversi',
+    'Blacklist Kata Konversi',
+    'manage_options',
+    'rekap-conversion-blacklist',
+    'velocity_render_conversion_blacklist_page'
+  );
+
+  add_submenu_page(
+    'rekap-chat-form',
     'Settings WhatsApp',
     'Settings',
     'manage_options',
@@ -62,6 +71,24 @@ function velocity_register_whatsapp_settings()
       'default' => vd_get_default_whatsapp_url_template(),
     ]
   );
+
+  register_setting(
+    'vd_conversion_blacklist_settings_group',
+    'vd_conversion_blacklist_enabled',
+    [
+      'sanitize_callback' => 'vd_sanitize_conversion_blacklist_enabled',
+      'default' => '0',
+    ]
+  );
+
+  register_setting(
+    'vd_conversion_blacklist_settings_group',
+    'vd_conversion_blacklist_keywords',
+    [
+      'sanitize_callback' => 'vd_sanitize_conversion_blacklist_keywords',
+      'default' => '',
+    ]
+  );
 }
 
 function velocity_sanitize_whatsapp_url_template($template)
@@ -78,6 +105,64 @@ function velocity_sanitize_whatsapp_url_template($template)
   }
 
   return $template;
+}
+
+function velocity_render_conversion_blacklist_page()
+{
+  if (!current_user_can('manage_options')) {
+    return;
+  }
+
+  $blacklist_enabled = vd_get_conversion_blacklist_enabled();
+  $blacklist_keywords = (string) get_option('vd_conversion_blacklist_keywords', '');
+?>
+  <div class="wrap">
+    <h1>Blacklist Kata Konversi</h1>
+    <?php settings_errors('vd_conversion_blacklist_keywords'); ?>
+    <form method="post" action="options.php">
+      <?php settings_fields('vd_conversion_blacklist_settings_group'); ?>
+      <table class="form-table" role="presentation">
+        <tr>
+          <th scope="row">Aktifkan Blacklist Kata Konversi</th>
+          <td>
+            <label for="vd_conversion_blacklist_enabled">
+              <input
+                type="checkbox"
+                id="vd_conversion_blacklist_enabled"
+                name="vd_conversion_blacklist_enabled"
+                value="1"
+                <?php checked($blacklist_enabled); ?>>
+              Jika aktif, lead yang mengandung frasa di daftar blacklist tetap masuk chat, tetapi konversi tidak dikirim.
+            </label>
+          </td>
+        </tr>
+        <tr>
+          <th scope="row">
+            <label for="vd_conversion_blacklist_keywords">Daftar Kata / Frasa Blacklist</label>
+          </th>
+          <td>
+            <textarea
+              id="vd_conversion_blacklist_keywords"
+              name="vd_conversion_blacklist_keywords"
+              rows="10"
+              class="large-text code"
+              style="max-width: 720px;"><?php echo esc_textarea($blacklist_keywords); ?></textarea>
+            <p class="description">
+              Isi satu kata atau frasa per baris. Baris kosong diabaikan. Spasi di tengah frasa tetap dipertahankan.
+            </p>
+            <p class="description">
+              Contoh:
+            </p>
+            <pre style="background:#fff; padding:10px; border:1px solid #ccd0d4; max-width: 420px;">uang jajan
+minta uang
+pinjam uang</pre>
+          </td>
+        </tr>
+      </table>
+      <?php submit_button('Simpan Blacklist Kata Konversi'); ?>
+    </form>
+  </div>
+<?php
 }
 
 function velocity_render_whatsapp_settings_page()

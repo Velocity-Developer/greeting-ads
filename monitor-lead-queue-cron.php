@@ -36,6 +36,7 @@ if (!defined('DB_HOST') || !defined('DB_NAME') || !defined('DB_USER') || !define
 
 $tablePrefix = isset($table_prefix) && is_string($table_prefix) && $table_prefix !== '' ? $table_prefix : 'wp_';
 $queueTable = $tablePrefix . 'vd_lead_queue';
+$optionsTable = $tablePrefix . 'options';
 
 // Ubah jika ingin kirim ke chat lain.
 $telegramChatIds = [
@@ -72,6 +73,11 @@ if (!$connected) {
 
 $mysqli->set_charset(defined('DB_CHARSET') && DB_CHARSET ? DB_CHARSET : 'utf8mb4');
 
+$conversionBlacklistConfig = [
+    'enabled' => monitorGetOptionValue($mysqli, $optionsTable, 'vd_conversion_blacklist_enabled') === '1',
+    'keywords' => monitorGetBlacklistKeywords(monitorGetOptionValue($mysqli, $optionsTable, 'vd_conversion_blacklist_keywords')),
+];
+
 $lastSeenId = (int) $state['last_seen_id'];
 $sql = "SELECT id, event_id, nama, no_whatsapp, jenis_website, via, greeting, label, process_status, retry_count, rekap_form_id, telegram_status, created_at
         FROM `{$queueTable}`
@@ -96,7 +102,7 @@ while ($row = $result->fetch_assoc()) {
     $queueId = (int) $row['id'];
     $maxSeenId = max($maxSeenId, $queueId);
 
-    $message = buildTelegramMessage($row, $queueTable);
+    $message = buildTelegramMessage($row, $queueTable, $conversionBlacklistConfig);
     $sent = sendTelegramMessage(TOKEN_TELEGRAM_BOT, $telegramChatIds, $message);
 
     if ($sent) {
@@ -118,7 +124,7 @@ if ($maxSeenId > $lastSeenId) {
 echo '[' . date('Y-m-d H:i:s') . "] selesai. last_seen_id={$maxSeenId}, notif_terkirim={$sentCount}" . PHP_EOL;
 exit(0);
 
-function buildTelegramMessage(array $row, string $queueTable): string
+function buildTelegramMessage(array $row, string $queueTable, array $conversionBlacklistConfig): string
 {
     $queueId = (int) ($row['id'] ?? 0);
     $eventId = escapeHtml((string) ($row['event_id'] ?? ''));
@@ -133,6 +139,9 @@ function buildTelegramMessage(array $row, string $queueTable): string
     $rekapFormId = (int) ($row['rekap_form_id'] ?? 0);
     $telegramStatus = escapeHtml((string) ($row['telegram_status'] ?? ''));
     $createdAt = escapeHtml((string) ($row['created_at'] ?? ''));
+    $conversionInfo = getConversionTrackingInfo((string) ($row['jenis_website'] ?? ''), $conversionBlacklistConfig);
+    $conversionStatus = escapeHtml((string) ($conversionInfo['status'] ?? 'Dilacak'));
+    $conversionTrigger = escapeHtml((string) ($conversionInfo['matched_keyword'] ?? ''));
 
     return "<b>Lead Queue Baru vd.com</b>\n"
         . "Tabel: <b>{$queueTable}</b>\n"
@@ -144,6 +153,8 @@ function buildTelegramMessage(array $row, string $queueTable): string
         . "Via: <b>{$via}</b>\n"
         . "Greeting: <b>{$greeting}</b>\n"
         . "Label: <b>{$label}</b>\n"
+        . "Status Konversi: <b>{$conversionStatus}</b>\n"
+        . ($conversionStatus === 'Tidak Dilacak' && $conversionTrigger !== '' ? "Frasa Pemicu: <b>{$conversionTrigger}</b>\n" : '')
         . "Status Saat Dicek: <b>{$processStatus}</b>\n"
         . "Retry Count: <b>{$retryCount}</b>\n"
         . "Rekap Form ID: <b>" . ($rekapFormId > 0 ? $rekapFormId : '-') . "</b>\n"
@@ -197,4 +208,98 @@ function sendTelegramMessage(string $botToken, array $chatIds, string $message):
 function escapeHtml(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+function monitorGetOptionValue(mysqli $mysqli, string $optionsTable, string $optionName): string
+{
+    $sql = "SELECT option_value FROM `{$optionsTable}` WHERE option_name = ? LIMIT 1";
+    $stmt = $mysqli->prepare($sql);
+    if (!$stmt) {
+        return '';
+    }
+
+    $stmt->bind_param('s', $optionName);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $value = '';
+
+    if ($result && ($row = $result->fetch_assoc())) {
+        $value = (string) ($row['option_value'] ?? '');
+    }
+
+    $stmt->close();
+
+    return $value;
+}
+
+function monitorGetBlacklistKeywords(string $rawValue): array
+{
+    $lines = preg_split('/\r\n|\r|\n/', $rawValue);
+    if (!is_array($lines)) {
+        return [];
+    }
+
+    $keywords = [];
+    foreach ($lines as $line) {
+        $normalized = monitorNormalizeBlacklistText($line);
+        if ($normalized === '') {
+            continue;
+        }
+
+        $keywords[] = $normalized;
+    }
+
+    return array_values(array_unique($keywords));
+}
+
+function monitorNormalizeBlacklistText(string $text): string
+{
+    $text = trim($text);
+    $text = preg_replace('/\s+/u', ' ', $text);
+    if ($text === '') {
+        return '';
+    }
+
+    return function_exists('mb_strtolower') ? mb_strtolower($text, 'UTF-8') : strtolower($text);
+}
+
+function getConversionTrackingStatus(string $jenisWebsite, array $config): string
+{
+    $info = getConversionTrackingInfo($jenisWebsite, $config);
+    return (string) ($info['status'] ?? 'Dilacak');
+}
+
+function getConversionTrackingInfo(string $jenisWebsite, array $config): array
+{
+    $result = [
+        'status' => 'Dilacak',
+        'matched_keyword' => '',
+    ];
+
+    if (empty($config['enabled'])) {
+        return $result;
+    }
+
+    $normalizedText = monitorNormalizeBlacklistText($jenisWebsite);
+    if ($normalizedText === '' || empty($config['keywords']) || !is_array($config['keywords'])) {
+        return $result;
+    }
+
+    foreach ($config['keywords'] as $keyword) {
+        if (!is_string($keyword) || $keyword === '') {
+            continue;
+        }
+
+        $matched = function_exists('mb_stripos')
+            ? mb_stripos($normalizedText, $keyword, 0, 'UTF-8') !== false
+            : stripos($normalizedText, $keyword) !== false;
+
+        if ($matched) {
+            $result['status'] = 'Tidak Dilacak';
+            $result['matched_keyword'] = $keyword;
+            return $result;
+        }
+    }
+
+    return $result;
 }
