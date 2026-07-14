@@ -3,18 +3,19 @@
 
 
 add_action('wp_ajax_get_high_intent_ips', 'get_high_intent_ips');
-function get_high_intent_ips() {
-    check_ajax_referer('get_high_intent_ips_nonce');
+function get_high_intent_ips()
+{
+  check_ajax_referer('get_high_intent_ips_nonce');
 
-    global $wpdb;
-    $table_name = $wpdb->prefix . 'vd_whatsapp_clicks';
-    
-    $threshold = isset($_POST['threshold']) ? intval($_POST['threshold']) : 5;
-    $greeting_filter_sql = " AND (greeting IS NULL OR greeting <> 'v0')";
+  global $wpdb;
+  $table_name = $wpdb->prefix . 'vd_whatsapp_clicks';
 
-    $results = $wpdb->get_results(
-        $wpdb->prepare(
-            "SELECT ip_address, COUNT(*) as total_clicks, 
+  $threshold = isset($_POST['threshold']) ? intval($_POST['threshold']) : 5;
+  $greeting_filter_sql = " AND (greeting IS NULL OR greeting <> 'v0')";
+
+  $results = $wpdb->get_results(
+    $wpdb->prepare(
+      "SELECT ip_address, COUNT(*) as total_clicks, 
              MAX(created_at) as last_click,
              GROUP_CONCAT(DISTINCT greeting SEPARATOR ', ') as greetings
              FROM $table_name
@@ -23,32 +24,33 @@ function get_high_intent_ips() {
              HAVING COUNT(*) >= %d
              ORDER BY total_clicks DESC
              LIMIT 100",
-            $threshold
-        )
-    );
+      $threshold
+    )
+  );
 
-    if (empty($results)) {
-        wp_send_json_success('<p>Tidak ada data High Intent saat ini.</p>');
-    }
+  if (empty($results)) {
+    wp_send_json_success('<p>Tidak ada data High Intent saat ini.</p>');
+  }
 
-    $html = '<table class="widefat striped" style="text-align:left;">';
-    $html .= '<thead><tr><th>IP Address</th><th>Total Klik</th><th>Terakhir Klik</th><th>Greeting</th><th>Aksi</th></tr></thead>';
-    $html .= '<tbody>';
-    
-    foreach ($results as $row) {
-        $ip = esc_html($row->ip_address);
-        $html .= '<tr>';
-        $html .= '<td><a href="admin.php?page=rekap-whatsapp-clicks&search_ip=' . $ip . '" target="_blank">' . $ip . '</a></td>';
-        $html .= '<td>' . intval($row->total_clicks) . '</td>';
-        $html .= '<td>' . esc_html($row->last_click) . '</td>';
-        $html .= '<td>' . esc_html($row->greetings) . '</td>';
-        $html .= '<td><button class="button button-small" onclick="copyToClipboard(\'' . $ip . '\', this)">Copy IP</button></td>';
-        $html .= '</tr>';
-    }
-    
-    $html .= '</tbody></table>';
+  $html = '<table class="widefat striped" style="text-align:left;">';
+  $html .= '<thead><tr><th>IP Address</th><th>Total Klik</th><th>Terakhir Klik</th><th>Greeting</th><th>Aksi</th></tr></thead>';
+  $html .= '<tbody>';
 
-    wp_send_json_success($html);
+  foreach ($results as $row) {
+    $ip = esc_html($row->ip_address);
+    $html .= '<tr>';
+    $html .= '<td><a href="admin.php?page=rekap-whatsapp-clicks&search_ip=' . $ip . '" target="_blank">' . $ip . '</a></td>';
+    $html .= '<td>' . intval($row->total_clicks) . '</td>';
+    $html .= '<td>' . esc_html($row->last_click) . '</td>';
+    $html .= '<td>' . esc_html($row->greetings) . '</td>';
+    $html .= '<td><button class="button button-small" onclick="copyToClipboard(\'' . $ip . '\', this)">Copy IP</button></td>';
+    $html .= '</tr>';
+  }
+
+  $html .= '</tbody></table>';
+
+  vd_log_ajax('get_high_intent_ips', 'success', 'Found ' . count($results) . ' IPs');
+  wp_send_json_success($html);
 }
 
 add_action('wp_ajax_rekap_chat_form', 'rekap_chat_form');
@@ -108,6 +110,7 @@ function rekap_chat_form()
   if (!is_wp_error($queue_result)) {
     vd_trigger_lead_queue_async($queue_result['queue_id']);
 
+    vd_log_ajax('rekap_chat_form', 'success', 'Lead masuk queue. Queue ID: ' . $queue_result['queue_id']);
     wp_send_json_success([
       'ai_result' => $ai_result,
       'wa_result' => $wa_result,
@@ -165,6 +168,7 @@ function rekap_chat_form()
     $log_message = "MySQL Error: " . $wpdb->last_error . "\nQueue error: " . $queue_result->get_error_message();
     kirim_telegram($log_message, $id_reports);
 
+    vd_log_ajax('rekap_chat_form', 'failed', 'Queue dan simpan sinkron sama-sama gagal');
     wp_send_json_error([
       'ai_result' => $ai_result,
       'wa_result' => $wa_result,
@@ -172,6 +176,7 @@ function rekap_chat_form()
     ], 500);
   }
 
+  vd_log_ajax('rekap_chat_form', 'success', 'Lead saved via sync fallback');
   wp_send_json_success([
     'ai_result' => $ai_result,
     'wa_result' => $wa_result,
@@ -180,7 +185,6 @@ function rekap_chat_form()
     'should_track_conversion' => $conversion_tracking['should_track'],
     'conversion_tracking_status' => $conversion_tracking['status_label'],
   ]);
-
 }
 
 
@@ -200,7 +204,6 @@ function vd_async_track_wa_click()
   if ($page_url === '' && isset($_SERVER['HTTP_REFERER'])) {
 
     $page_url = esc_url_raw(wp_unslash($_SERVER['HTTP_REFERER']));
-
   }
 
 
@@ -240,11 +243,8 @@ function vd_async_track_wa_click()
       ) {
 
         $is_ads = true;
-
       }
-
     }
-
   }
 
 
@@ -258,7 +258,6 @@ function vd_async_track_wa_click()
   if (!$is_ads) {
 
     $greeting = 'v0';
-
   } else {
 
     if ($greeting === '' || $greeting === 'v0') {
@@ -268,9 +267,7 @@ function vd_async_track_wa_click()
       $cookie_greeting = trim($cookie_greeting);
 
       $greeting = $cookie_greeting !== '' ? $cookie_greeting : 'vx';
-
     }
-
   }
 
 
@@ -282,7 +279,6 @@ function vd_async_track_wa_click()
   if ($event_id === '' && function_exists('vd_generate_whatsapp_event_id')) {
 
     $event_id = vd_generate_whatsapp_event_id();
-
   }
 
 
@@ -308,7 +304,6 @@ function vd_async_track_wa_click()
   if (empty($payload['ip_address'])) {
 
     $payload['ip_address'] = 'unknown';
-
   }
 
 
@@ -316,7 +311,6 @@ function vd_async_track_wa_click()
   if (empty($payload['user_agent'])) {
 
     $payload['user_agent'] = 'unknown';
-
   }
 
 
@@ -324,7 +318,6 @@ function vd_async_track_wa_click()
   if (function_exists('vd_maybe_upgrade_whatsapp_clicks_table')) {
 
     vd_maybe_upgrade_whatsapp_clicks_table();
-
   }
 
 
@@ -353,16 +346,15 @@ function vd_async_track_wa_click()
 
     if (!$scheduled) {
 
+      vd_log_ajax('vd_async_track_wa_click', 'failed', $error_message);
       wp_send_json_error(['logged' => false, 'message' => $error_message], 500);
-
     }
-
   }
 
 
 
+  vd_log_ajax('vd_async_track_wa_click', 'success', 'Tracked', ['greeting' => $greeting]);
   wp_send_json_success(['logged' => true]);
-
 }
 
 function vd_track_form_funnel_event()
@@ -371,6 +363,7 @@ function vd_track_form_funnel_event()
   $allowed_event_types = ['form_view', 'form_start', 'submit_enabled', 'submit_click'];
 
   if (!in_array($event_type, $allowed_event_types, true)) {
+    vd_log_ajax('vd_track_form_funnel_event', 'failed', 'Event type tidak valid: ' . $event_type);
     wp_send_json_error(['message' => 'Event type tidak valid.'], 400);
   }
 
@@ -412,9 +405,11 @@ function vd_track_form_funnel_event()
   $saved = vd_insert_form_funnel_event($payload);
 
   if (is_wp_error($saved)) {
+    vd_log_ajax('vd_track_form_funnel_event', 'failed', $saved->get_error_message());
     wp_send_json_error(['message' => $saved->get_error_message()], 500);
   }
 
+  vd_log_ajax('vd_track_form_funnel_event', 'success', 'Event tracked', ['event_type' => $event_type]);
   wp_send_json_success([
     'logged' => true,
     'event_id' => $saved['event_id'],
@@ -446,10 +441,10 @@ function cek_jenis_website_ai_handler()
 
   if (empty($ids)) {
 
+    vd_log_ajax('cek_jenis_website_ai', 'failed', 'Tidak ada ID yang dikirim');
     wp_send_json_error('Tidak ada ID yang dikirim.');
 
     return;
-
   }
 
 
@@ -460,10 +455,10 @@ function cek_jenis_website_ai_handler()
 
   if (!$results) {
 
+    vd_log_ajax('cek_jenis_website_ai', 'failed', 'Data tidak ditemukan');
     wp_send_json_error('Data tidak ditemukan.');
 
     return;
-
   }
 
 
@@ -495,19 +490,17 @@ function cek_jenis_website_ai_handler()
       'dilarang' => '⚠️',
 
       default    => '',
-
     };
 
     $responses[] = "ID {$row->id}: <strong>{$statusLabel}</strong> ({$input})";
-
   }
 
 
 
   echo '<div class="updated"><ul><li>' . implode('</li><li>', $responses) . '</li></ul></div>';
 
+  vd_log_ajax('cek_jenis_website_ai', 'success', 'Checked ' . count($ids) . ' items');
   wp_die();
-
 }
 
 
@@ -536,10 +529,10 @@ function update_inline_status_handler()
 
   if (empty($id)) {
 
+    vd_log_ajax('update_inline_status', 'failed', 'ID tidak valid');
     wp_send_json_error('ID tidak valid.');
 
     return;
-
   }
 
 
@@ -564,16 +557,16 @@ function update_inline_status_handler()
 
   if ($result === false) {
 
+    vd_log_ajax('update_inline_status', 'failed', 'Gagal update status ID ' . $id);
     wp_send_json_error('Gagal memperbarui status di database.');
 
     return;
-
   }
 
 
 
+  vd_log_ajax('update_inline_status', 'success', 'Updated ID ' . $id . ' to ' . $status);
   wp_send_json_success(['status' => $status]);
-
 }
 
 
@@ -581,7 +574,6 @@ function update_inline_status_handler()
 if (!defined('VD_WA_CLICK_CRON_HOOK')) {
 
   define('VD_WA_CLICK_CRON_HOOK', 'vd_process_whatsapp_click_job');
-
 }
 
 
@@ -589,7 +581,6 @@ if (!defined('VD_WA_CLICK_CRON_HOOK')) {
 if (!defined('VD_WA_CLICK_RETRY_DELAYS')) {
 
   define('VD_WA_CLICK_RETRY_DELAYS', '60,300,900,3600,21600');
-
 }
 
 
@@ -603,13 +594,11 @@ function vd_get_whatsapp_retry_delays()
   $delays = array_values(array_filter($delays, function ($delay) {
 
     return $delay > 0;
-
   }));
 
 
 
   return empty($delays) ? [60, 300, 900, 3600, 21600] : $delays;
-
 }
 
 
@@ -621,13 +610,11 @@ function vd_generate_whatsapp_event_id()
   if (function_exists('wp_generate_uuid4')) {
 
     return wp_generate_uuid4();
-
   }
 
 
 
   return uniqid('vdwa_', true);
-
 }
 
 
@@ -663,7 +650,6 @@ function vd_normalize_whatsapp_click_payload($payload)
   if ($normalized['ip_address'] === '') {
 
     $normalized['ip_address'] = 'unknown';
-
   }
 
 
@@ -671,13 +657,11 @@ function vd_normalize_whatsapp_click_payload($payload)
   if ($normalized['user_agent'] === '') {
 
     $normalized['user_agent'] = 'unknown';
-
   }
 
 
 
   return $normalized;
-
 }
 
 
@@ -691,7 +675,6 @@ function vd_schedule_whatsapp_click_job($payload, $attempt = 0, $delay_seconds =
   if (empty($payload['event_id'])) {
 
     return false;
-
   }
 
 
@@ -707,13 +690,11 @@ function vd_schedule_whatsapp_click_job($payload, $attempt = 0, $delay_seconds =
   if (wp_next_scheduled(VD_WA_CLICK_CRON_HOOK, [$payload])) {
 
     return true;
-
   }
 
 
 
   return (bool) wp_schedule_single_event($timestamp, VD_WA_CLICK_CRON_HOOK, [$payload]);
-
 }
 
 
@@ -731,7 +712,6 @@ function vd_upsert_whatsapp_click_status($payload, $status, $retry_count, $error
   if (empty($payload['event_id'])) {
 
     return false;
-
   }
 
 
@@ -763,7 +743,6 @@ function vd_upsert_whatsapp_click_status($payload, $status, $retry_count, $error
   if ($existing && $existing->status === 'success' && $status !== 'success') {
 
     return true;
-
   }
 
 
@@ -825,7 +804,6 @@ function vd_upsert_whatsapp_click_status($payload, $status, $retry_count, $error
 
 
     return $result !== false;
-
   }
 
 
@@ -843,7 +821,6 @@ function vd_upsert_whatsapp_click_status($payload, $status, $retry_count, $error
 
 
   return $insert_result !== false;
-
 }
 
 
@@ -877,19 +854,16 @@ function vd_schedule_whatsapp_click_retry($payload, $attempt, $error_message)
     if (!$scheduled) {
 
       vd_upsert_whatsapp_click_status($payload, 'failed', $next_attempt, 'Failed to schedule retry job');
-
     }
 
 
 
     return $scheduled;
-
   }
 
 
 
   return vd_upsert_whatsapp_click_status($payload, 'failed', $next_attempt, $error_message);
-
 }
 
 
@@ -907,7 +881,6 @@ function vd_process_whatsapp_click_job($payload = [])
   if (function_exists('vd_maybe_upgrade_whatsapp_clicks_table')) {
 
     vd_maybe_upgrade_whatsapp_clicks_table();
-
   }
 
 
@@ -919,7 +892,6 @@ function vd_process_whatsapp_click_job($payload = [])
   if (empty($payload['event_id'])) {
 
     return;
-
   }
 
 
@@ -943,7 +915,6 @@ function vd_process_whatsapp_click_job($payload = [])
   if ($existing && $existing->status === 'success') {
 
     return;
-
   }
 
 
@@ -959,9 +930,7 @@ function vd_process_whatsapp_click_job($payload = [])
       vd_schedule_whatsapp_click_retry($payload, $attempt, $error_message);
 
       return;
-
     }
-
   } else {
 
     $marked_pending = vd_upsert_whatsapp_click_status($payload, 'pending', $attempt, '');
@@ -973,9 +942,7 @@ function vd_process_whatsapp_click_job($payload = [])
       vd_schedule_whatsapp_click_retry($payload, $attempt, $error_message);
 
       return;
-
     }
-
   }
 
 
@@ -987,7 +954,5 @@ function vd_process_whatsapp_click_job($payload = [])
     $error_message = $wpdb->last_error ?: 'Failed to finalize WA click row';
 
     vd_schedule_whatsapp_click_retry($payload, $attempt, $error_message);
-
   }
-
 }

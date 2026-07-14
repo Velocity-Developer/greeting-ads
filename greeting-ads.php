@@ -32,6 +32,7 @@ require_once plugin_dir_path(__FILE__) . 'api/greeting.php';
 require_once plugin_dir_path(__FILE__) . 'api/vdnet.php';
 require_once plugin_dir_path(__FILE__) . 'includes/sync-api.php'; // API untuk sync data dari apivdcom
 require_once plugin_dir_path(__FILE__) . 'includes/klien-kami.php';
+require_once plugin_dir_path(__FILE__) . 'includes/ajax-log.php';
 
 // Hook untuk menambahkan menu admin
 add_action('admin_menu', 'greeting_ads_add_menu');
@@ -84,6 +85,7 @@ function greeting_ads_create_table()
     vd_maybe_upgrade_whatsapp_clicks_table(true);
     vd_maybe_upgrade_lead_queue_table(true);
     vd_maybe_upgrade_form_funnel_table(true);
+    vd_maybe_upgrade_ajax_log_table(true);
 }
 
 // Hook untuk menghapus tabel saat plugin dihapus

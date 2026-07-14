@@ -239,12 +239,14 @@ function vd_process_lead_queue_ajax()
 {
   $queue_id = isset($_POST['queue_id']) ? (int) $_POST['queue_id'] : 0;
   if ($queue_id <= 0) {
+    vd_log_ajax('vd_process_lead_queue', 'failed', 'Queue ID tidak valid');
     wp_send_json_error(['message' => 'Queue ID tidak valid.'], 400);
   }
 
   check_ajax_referer('vd_process_lead_queue_' . $queue_id, 'nonce');
 
   $processed = vd_process_lead_queue_job($queue_id);
+  vd_log_ajax('vd_process_lead_queue', $processed ? 'success' : 'failed', 'Queue ID: ' . $queue_id);
   wp_send_json_success(['processed' => (bool) $processed]);
 }
 
